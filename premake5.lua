@@ -1,5 +1,4 @@
-workspace "Lua"
-	architecture "x64"
+
 
 	configurations
 	{
@@ -7,21 +6,20 @@ workspace "Lua"
 		"Release"
 	}
 	project "Lua"
-	--location "vendor/lua"
+	location "vendor/lua"
 	language "C"
 	systemversion "latest"
 	kind "StaticLib"
 	staticruntime "off"
 	
 
-	--targetdir ("../../bin/" .. outputdir .. "/%{prj.name}")
-	--objdir ("../../build/" .. outputdir .. "/%{prj.name}")
-	targetdir ("./bin/" .. "" .. "/%{prj.name}")
-	objdir (".build/" .. "" .. "/%{prj.name}")
+	targetdir ("../../bin/" .. outputdir .. "/%{prj.name}")
+	objdir ("../../build/" .. outputdir .. "/%{prj.name}")
+
 
 	includedirs 
 	{
-		--"lua"
+		"vendor/lua/"
 	}
 
 	files 
