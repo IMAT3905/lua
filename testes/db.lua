@@ -119,6 +119,16 @@ else
 end
 ]], {2,3,4,7})
 
+test([[
+local function foo()
+end
+foo()
+A = 1
+A = 2
+A = 3
+]], {2, 3, 2, 4, 5, 6})
+
+
 test([[--
 if nil then
   a=1
@@ -649,6 +659,11 @@ t = debug.getinfo(1)   -- main
 assert(t.isvararg == true and t.nparams == 0 and t.nups == 1 and
        debug.getupvalue(t.func, 1) == "_ENV")
 
+t = debug.getinfo(math.sin)   -- C function
+assert(t.isvararg == true and t.nparams == 0 and t.nups == 0)
+
+t = debug.getinfo(string.gmatch("abc", "a"))   -- C closure
+assert(t.isvararg == true and t.nparams == 0 and t.nups > 0)
 
 
 
@@ -879,7 +894,7 @@ end
 
 
 print("testing debug functions on chunk without debug info")
-prog = [[-- program to be loaded without debug information
+prog = [[-- program to be loaded without debug information (strip)
 local debug = require'debug'
 local a = 12  -- a local variable
 
@@ -921,6 +936,23 @@ return a
 local f = assert(load(string.dump(load(prog), true)))
 
 assert(f() == 13)
+
+do   -- bug in 5.4.0: line hooks in stripped code
+  local function foo ()
+    local a = 1
+    local b = 2
+    return b
+  end
+
+  local s = load(string.dump(foo, true))
+  local line = true
+  debug.sethook(function (e, l)
+    assert(e == "line")
+    line = l
+  end, "l")
+  assert(s() == 2); debug.sethook(nil)
+  assert(line == nil)  -- hook called withoug debug info for 1st instruction
+end
 
 do   -- tests for 'source' in binary dumps
   local prog = [[

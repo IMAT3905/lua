@@ -88,8 +88,8 @@
 #define dummynode		(&dummynode_)
 
 static const Node dummynode_ = {
-  {{NULL}, LUA_TEMPTY,  /* value's value and type */
-   LUA_TNIL, 0, {NULL}}  /* key type, next, and key value */
+  {{NULL}, LUA_VEMPTY,  /* value's value and type */
+   LUA_VNIL, 0, {NULL}}  /* key type, next, and key value */
 };
 
 
@@ -135,21 +135,21 @@ static int l_hashfloat (lua_Number n) {
 */
 static Node *mainposition (const Table *t, int ktt, const Value *kvl) {
   switch (withvariant(ktt)) {
-    case LUA_TNUMINT:
+    case LUA_VNUMINT:
       return hashint(t, ivalueraw(*kvl));
-    case LUA_TNUMFLT:
+    case LUA_VNUMFLT:
       return hashmod(t, l_hashfloat(fltvalueraw(*kvl)));
-    case LUA_TSHRSTR:
+    case LUA_VSHRSTR:
       return hashstr(t, tsvalueraw(*kvl));
-    case LUA_TLNGSTR:
+    case LUA_VLNGSTR:
       return hashpow2(t, luaS_hashlongstr(tsvalueraw(*kvl)));
-    case LUA_TFALSE:
+    case LUA_VFALSE:
       return hashboolean(t, 0);
-    case LUA_TTRUE:
+    case LUA_VTRUE:
       return hashboolean(t, 1);
-    case LUA_TLIGHTUSERDATA:
+    case LUA_VLIGHTUSERDATA:
       return hashpointer(t, pvalueraw(*kvl));
-    case LUA_TLCF:
+    case LUA_VLCF:
       return hashpointer(t, fvalueraw(*kvl));
     default:
       return hashpointer(t, gcvalueraw(*kvl));
@@ -166,28 +166,41 @@ static Node *mainpositionTV (const Table *t, const TValue *key) {
 
 
 /*
-** Check whether key 'k1' is equal to the key in node 'n2'.
-** This equality is raw, so there are no metamethods. Floats
-** with integer values have been normalized, so integers cannot
-** be equal to floats. It is assumed that 'eqshrstr' is simply
-** pointer equality, so that short strings are handled in the
-** default case.
+** Check whether key 'k1' is equal to the key in node 'n2'. This
+** equality is raw, so there are no metamethods. Floats with integer
+** values have been normalized, so integers cannot be equal to
+** floats. It is assumed that 'eqshrstr' is simply pointer equality, so
+** that short strings are handled in the default case.
+** A true 'deadok' means to accept dead keys as equal to their original
+** values. All dead keys are compared in the default case, by pointer
+** identity. (Only collectable objects can produce dead keys.) Note that
+** dead long strings are also compared by identity.
+** Once a key is dead, its corresponding value may be collected, and
+** then another value can be created with the same address. If this
+** other value is given to 'next', 'equalkey' will signal a false
+** positive. In a regular traversal, this situation should never happen,
+** as all keys given to 'next' came from the table itself, and therefore
+** could not have been collected. Outside a regular traversal, we
+** have garbage in, garbage out. What is relevant is that this false
+** positive does not break anything.  (In particular, 'next' will return
+** some other valid item on the table or nil.)
 */
-static int equalkey (const TValue *k1, const Node *n2) {
-  if (rawtt(k1) != keytt(n2))  /* not the same variants? */
+static int equalkey (const TValue *k1, const Node *n2, int deadok) {
+  if ((rawtt(k1) != keytt(n2)) &&  /* not the same variants? */
+       !(deadok && keyisdead(n2) && iscollectable(k1)))
    return 0;  /* cannot be same key */
-  switch (ttypetag(k1)) {
-    case LUA_TNIL: case LUA_TFALSE: case LUA_TTRUE:
+  switch (keytt(n2)) {
+    case LUA_VNIL: case LUA_VFALSE: case LUA_VTRUE:
       return 1;
-    case LUA_TNUMINT:
+    case LUA_VNUMINT:
       return (ivalue(k1) == keyival(n2));
-    case LUA_TNUMFLT:
+    case LUA_VNUMFLT:
       return luai_numeq(fltvalue(k1), fltvalueraw(keyval(n2)));
-    case LUA_TLIGHTUSERDATA:
+    case LUA_VLIGHTUSERDATA:
       return pvalue(k1) == pvalueraw(keyval(n2));
-    case LUA_TLCF:
+    case LUA_VLCF:
       return fvalue(k1) == fvalueraw(keyval(n2));
-    case LUA_TLNGSTR:
+    case ctb(LUA_VLNGSTR):
       return luaS_eqlngstr(tsvalue(k1), keystrval(n2));
     default:
       return gcvalue(k1) == gcvalueraw(keyval(n2));
@@ -251,11 +264,12 @@ static unsigned int setlimittosize (Table *t) {
 /*
 ** "Generic" get version. (Not that generic: not valid for integers,
 ** which may be in array part, nor for floats with integral values.)
+** See explanation about 'deadok' in function 'equalkey'.
 */
-static const TValue *getgeneric (Table *t, const TValue *key) {
+static const TValue *getgeneric (Table *t, const TValue *key, int deadok) {
   Node *n = mainpositionTV(t, key);
   for (;;) {  /* check whether 'key' is somewhere in the chain */
-    if (equalkey(key, n))
+    if (equalkey(key, n, deadok))
       return gval(n);  /* that's it */
     else {
       int nx = gnext(n);
@@ -292,7 +306,7 @@ static unsigned int findindex (lua_State *L, Table *t, TValue *key,
   if (i - 1u < asize)  /* is 'key' inside array part? */
     return i;  /* yes; that's the index */
   else {
-    const TValue *n = getgeneric(t, key);
+    const TValue *n = getgeneric(t, key, 1);
     if (unlikely(isabstkey(n)))
       luaG_runerror(L, "invalid key to 'next'");  /* key not found */
     i = cast_int(nodefromval(n) - gnode(t, 0));  /* key index in hash table */
@@ -580,10 +594,10 @@ static void rehash (lua_State *L, Table *t, const TValue *ek) {
 
 
 Table *luaH_new (lua_State *L) {
-  GCObject *o = luaC_newobj(L, LUA_TTABLE, sizeof(Table));
+  GCObject *o = luaC_newobj(L, LUA_VTABLE, sizeof(Table));
   Table *t = gco2t(o);
   t->metatable = NULL;
-  t->flags = cast_byte(~0);
+  t->flags = cast_byte(maskflags);  /* table has no metamethod fields */
   t->array = NULL;
   t->alimit = 0;
   setnodevector(L, t, 0);
@@ -710,7 +724,7 @@ const TValue *luaH_getint (Table *t, lua_Integer key) {
 */
 const TValue *luaH_getshortstr (Table *t, TString *key) {
   Node *n = hashstr(t, key);
-  lua_assert(key->tt == LUA_TSHRSTR);
+  lua_assert(key->tt == LUA_VSHRSTR);
   for (;;) {  /* check whether 'key' is somewhere in the chain */
     if (keyisshrstr(n) && eqshrstr(keystrval(n), key))
       return gval(n);  /* that's it */
@@ -725,12 +739,12 @@ const TValue *luaH_getshortstr (Table *t, TString *key) {
 
 
 const TValue *luaH_getstr (Table *t, TString *key) {
-  if (key->tt == LUA_TSHRSTR)
+  if (key->tt == LUA_VSHRSTR)
     return luaH_getshortstr(t, key);
   else {  /* for long strings, use generic case */
     TValue ko;
     setsvalue(cast(lua_State *, NULL), &ko, key);
-    return getgeneric(t, &ko);
+    return getgeneric(t, &ko, 0);
   }
 }
 
@@ -740,17 +754,17 @@ const TValue *luaH_getstr (Table *t, TString *key) {
 */
 const TValue *luaH_get (Table *t, const TValue *key) {
   switch (ttypetag(key)) {
-    case LUA_TSHRSTR: return luaH_getshortstr(t, tsvalue(key));
-    case LUA_TNUMINT: return luaH_getint(t, ivalue(key));
-    case LUA_TNIL: return &absentkey;
-    case LUA_TNUMFLT: {
+    case LUA_VSHRSTR: return luaH_getshortstr(t, tsvalue(key));
+    case LUA_VNUMINT: return luaH_getint(t, ivalue(key));
+    case LUA_VNIL: return &absentkey;
+    case LUA_VNUMFLT: {
       lua_Integer k;
       if (luaV_flttointeger(fltvalue(key), &k, F2Ieq)) /* integral index? */
         return luaH_getint(t, k);  /* use specialized version */
       /* else... */
     }  /* FALLTHROUGH */
     default:
-      return getgeneric(t, key);
+      return getgeneric(t, key, 0);
   }
 }
 

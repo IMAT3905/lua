@@ -23,7 +23,7 @@
 
 /* kinds of variables/expressions */
 typedef enum {
-  VVOID,  /* when 'expdesc' describes the last expression a list,
+  VVOID,  /* when 'expdesc' describes the last expression of a list,
              this kind means an empty list (so, no expression) */
   VNIL,  /* constant nil */
   VTRUE,  /* constant true */
@@ -38,7 +38,8 @@ typedef enum {
   VLOCAL,  /* local variable; var.sidx = stack index (local register);
               var.vidx = relative index in 'actvar.arr'  */
   VUPVAL,  /* upvalue variable; info = index of upvalue in 'upvalues' */
-  VCONST,  /* compile-time constant; info = absolute index in 'actvar.arr'  */
+  VCONST,  /* compile-time <const> variable;
+              info = absolute index in 'actvar.arr'  */
   VINDEXED,  /* indexed variable;
                 ind.t = table register;
                 ind.idx = key's R index */
@@ -77,7 +78,7 @@ typedef struct expdesc {
     } ind;
     struct {  /* for local variables */
       lu_byte sidx;  /* index in the stack */
-      unsigned short vidx;  /* index in 'actvar.arr'  */
+      unsigned short vidx;  /* compiler index (in 'actvar.arr')  */
     } var;
   } u;
   int t;  /* patch list of 'exit when true' */
@@ -125,7 +126,7 @@ typedef struct Labellist {
 
 /* dynamic structures used by the parser */
 typedef struct Dyndata {
-  struct {  /* list of active local variables */
+  struct {  /* list of all active local variables */
     Vardesc *arr;
     int n;
     int size;

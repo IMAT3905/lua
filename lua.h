@@ -18,7 +18,7 @@
 
 #define LUA_VERSION_MAJOR	"5"
 #define LUA_VERSION_MINOR	"4"
-#define LUA_VERSION_RELEASE	"0"
+#define LUA_VERSION_RELEASE	"2"
 
 #define LUA_VERSION_NUM			504
 #define LUA_VERSION_RELEASE_NUM		(LUA_VERSION_NUM * 100 + 0)
@@ -72,7 +72,7 @@ typedef struct lua_State lua_State;
 #define LUA_TUSERDATA		7
 #define LUA_TTHREAD		8
 
-#define LUA_NUMTAGS		9
+#define LUA_NUMTYPES		9
 
 
 
@@ -411,6 +411,8 @@ LUA_API void  (lua_toclose) (lua_State *L, int idx);
 #define lua_newuserdata(L,s)	lua_newuserdatauv(L,s,1)
 #define lua_getuservalue(L,idx)	lua_getiuservalue(L,idx,1)
 #define lua_setuservalue(L,idx)	lua_setiuservalue(L,idx,1)
+
+#define LUA_NUMTAGS		LUA_NUMTYPES
 
 /* }============================================================== */
 

@@ -246,6 +246,11 @@ do
 
   X = false
   foo = function (x)
+    local _<close> = func2close(function ()
+      -- without errors, enclosing function should be still active when
+      -- __close is called
+      assert(debug.getinfo(2).name == "foo")
+    end)
     local  _<close> = closescope
     local y = 15
     return y
@@ -262,6 +267,43 @@ do
   assert(foo() == closescope and X == true)
 
 end
+
+
+-- testing to-be-closed x compile-time constants
+-- (there were some bugs here in Lua 5.4-rc3, due to a confusion
+-- between compile levels and stack levels of variables)
+do
+  local flag = false
+  local x = setmetatable({},
+    {__close = function() assert(flag == false); flag = true end})
+  local y <const> = nil
+  local z <const> = nil
+  do
+      local a <close> = x
+  end
+  assert(flag)   -- 'x' must be closed here
+end
+
+do
+  -- similar problem, but with implicit close in for loops
+  local flag = false
+  local x = setmetatable({},
+    {__close = function () assert(flag == false); flag = true end})
+  -- return an empty iterator, nil, nil, and 'x' to be closed
+  local function a ()
+    return (function () return nil end), nil, nil, x
+  end
+  local v <const> = 1
+  local w <const> = 1
+  local x <const> = 1
+  local y <const> = 1
+  local z <const> = 1
+  for k in a() do
+      a = k
+  end    -- ending the loop must close 'x'
+  assert(flag)   -- 'x' must be closed here
+end
+
 
 
 do
@@ -300,8 +342,20 @@ local function endwarn ()
   if not T then
     warn("@on")          -- back to normal
   else
-    assert(_WARN == nil)
+    assert(_WARN == false)
     warn("@normal")
+  end
+end
+
+
+-- errors inside __close can generate a warning instead of an
+-- error. This new 'assert' force them to appear.
+local function assert(cond, msg)
+  if not cond then
+    local line = debug.getinfo(2).currentline or "?"
+    msg = string.format("assertion failed! line %d (%s)\n", line, msg or "")
+    io.stderr:write(msg)
+    os.exit(1)
   end
 end
 
@@ -309,7 +363,7 @@ end
 local function checkwarn (msg)
   if T then
     assert(string.find(_WARN, msg))
-    _WARN = nil    -- reset variable to check next warning
+    _WARN = false    -- reset variable to check next warning
   end
 end
 
@@ -369,11 +423,15 @@ do print("testing errors in __close")
 
     local x <close> =
       func2close(function (self, msg)
+        -- after error, 'foo' was discarded, so caller now
+        -- must be 'pcall'
+        assert(debug.getinfo(2).name == "pcall")
         assert(msg == 4)
       end)
 
     local x1 <close> =
       func2close(function (self, msg)
+        assert(debug.getinfo(2).name == "pcall")
         checkwarn("@y")
         assert(msg == 4)
         error("@x1")
@@ -383,6 +441,7 @@ do print("testing errors in __close")
 
     local y <close> =
       func2close(function (self, msg)
+        assert(debug.getinfo(2).name == "pcall")
         assert(msg == 4)   -- error in body
         checkwarn("@z")
         error("@y")
@@ -391,6 +450,7 @@ do print("testing errors in __close")
     local first = true
     local z <close> =
       func2close(function (self, msg)
+        assert(debug.getinfo(2).name == "pcall")
         -- 'z' close is called once
         assert(first and msg == 4)
         first = false
